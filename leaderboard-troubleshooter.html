@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaderboard Troubleshooter</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .warning {
+            color: orange;
+            font-weight: bold;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        input, textarea {
+            padding: 8px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        .step {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-left: 3px solid #ddd;
+        }
+        .step.passed {
+            border-left-color: green;
+        }
+        .step.failed {
+            border-left-color: red;
+        }
+        .step.warning {
+            border-left-color: orange;
+        }
+        .code-block {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Leaderboard Troubleshooter</h1>
+    
+    <div class="card">
+        <h2>Step 1: Enter Your Supabase Credentials</h2>
+        <p>Enter your Supabase URL and anon key:</p>
+        
+        <label for="supabaseUrl">Supabase URL:</label>
+        <input type="text" id="supabaseUrl" placeholder="https://your-project-id.supabase.co">
+        
+        <label for="supabaseKey">Supabase Anon Key:</label>
+        <input type="text" id="supabaseKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+        
+        <button onclick="testConnection()">Test Connection</button>
+    </div>
+    
+    <div class="card">
+        <h2>Step 2: Check Database Tables</h2>
+        <p>This will check if the required tables exist in your Supabase project:</p>
+        <button onclick="checkTables()">Check Tables</button>
+    </div>
+    
+    <div class="card">
+        <h2>Step 3: Create Database Tables</h2>
+        <p>If your tables don't exist, you can create them by running this SQL script in your Supabase SQL Editor:</p>
+        <div class="code-block" id="sqlScript">-- Loading SQL script...</div>
+        <button onclick="copySQL()">Copy SQL to Clipboard</button>
+    </div>
+    
+    <div class="card">
+        <h2>Step 4: Update Your Config File</h2>
+        <p>Once your connection is working, update your supabase-config.js file with this code:</p>
+        <div class="code-block" id="configCode">// Loading config code...</div>
+        <button onclick="copyConfig()">Copy Config to Clipboard</button>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        let supabase = null;
+        
+        // Load SQL script
+        window.onload = function() {
+            loadSQLScript();
+            updateConfigCode();
+        };
+        
+        function loadSQLScript() {
+            const sqlScript = `-- Complete Supabase Setup Script for Space Racer Game
+-- Run this script in the Supabase SQL Editor to set up all required database objects
+
+-- 1. Create the main leaderboard table
+CREATE TABLE leaderboard (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    player_name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    wave_reached INTEGER NOT NULL
+);
+
+COMMENT ON TABLE leaderboard IS 'Stores player scores and information for the Space Racer game';
+
+-- 2. Create indexes for better performance
+CREATE INDEX idx_leaderboard_score ON leaderboard (score DESC);
+CREATE INDEX idx_leaderboard_player_name ON leaderboard (player_name);
+CREATE INDEX idx_leaderboard_score_date ON leaderboard (score DESC, created_at DESC);
+
+-- 3. Create a public view of the leaderboard that excludes email addresses
+CREATE VIEW leaderboard_public AS
+SELECT 
+    id,
+    created_at,
+    player_name,
+    score,
+    wave_reached
+FROM 
+    leaderboard
+ORDER BY 
+    score DESC;
+
+COMMENT ON VIEW leaderboard_public IS 'Public view of the leaderboard without sensitive information';
+
+-- 4. Enable Row Level Security on the leaderboard table
+ALTER TABLE leaderboard ENABLE ROW LEVEL SECURITY;
+
+-- 5. Create RLS policies
+-- Allow anyone to read the leaderboard data
+CREATE POLICY "Allow public read access" 
+ON leaderboard 
+FOR SELECT 
+USING (true);
+
+-- Allow anyone to insert new scores
+CREATE POLICY "Allow public insert access" 
+ON leaderboard 
+FOR INSERT 
+WITH CHECK (true);
+
+-- Prevent updates to existing scores
+CREATE POLICY "Prevent score updates" 
+ON leaderboard 
+FOR UPDATE 
+USING (false);
+
+-- Prevent deletion of scores
+CREATE POLICY "Prevent score deletion" 
+ON leaderboard 
+FOR DELETE 
+USING (false);
+
+-- 6. Insert some sample data (optional)
+INSERT INTO leaderboard (player_name, email, score, wave_reached)
+VALUES 
+    ('SpaceMaster', 'sample1@example.com', 5000, 10),
+    ('StarRacer', 'sample2@example.com', 4500, 9),
+    ('CosmicPilot', 'sample3@example.com', 4200, 8);`;
+            
+            document.getElementById('sqlScript').textContent = sqlScript;
+        }
+        
+        function updateConfigCode() {
+            const url = document.getElementById('supabaseUrl').value || 'YOUR_SUPABASE_URL';
+            const key = document.getElementById('supabaseKey').value || 'YOUR_SUPABASE_ANON_KEY';
+            
+            const configCode = `/**
+ * Supabase Configuration
+ * 
+ * This file contains your Supabase project credentials.
+ */
+
+const SUPABASE_CONFIG = {
+  url: '${url}',
+  key: '${key}'
+};
+
+// Don't modify below this line
+(function() {
+  // Make the config available globally
+  window.SUPABASE_CONFIG = SUPABASE_CONFIG;
+})();`;
+            
+            document.getElementById('configCode').textContent = configCode;
+        }
+        
+        function copySQL() {
+            const sqlScript = document.getElementById('sqlScript').textContent;
+            navigator.clipboard.writeText(sqlScript)
+                .then(() => alert('SQL script copied to clipboard!'))
+                .catch(err => alert('Failed to copy: ' + err));
+        }
+        
+        function copyConfig() {
+            const configCode = document.getElementById('configCode').textContent;
+            navigator.clipboard.writeText(configCode)
+                .then(() => alert('Config code copied to clipboard!'))
+                .catch(err => alert('Failed to copy: ' + err));
+        }
+        
+        function addResult(title, status, message) {
+            const results = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `step ${status}`;
+            
+            let statusIcon = '⚠️';
+            if (status === 'passed') statusIcon = '✅';
+            if (status === 'failed') statusIcon = '❌';
+            
+            resultDiv.innerHTML = `
+                <h3>${statusIcon} ${title}</h3>
+                <p>${message}</p>
+            `;
+            
+            results.appendChild(resultDiv);
+            return resultDiv;
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        async function testConnection() {
+            clearResults();
+            
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                addResult(
+                    'Missing Credentials', 
+                    'failed',
+                    'Please enter both Supabase URL and anon key.'
+                );
+                return;
+            }
+            
+            // Update the config code display
+            updateConfigCode();
+            
+            const connectionResult = addResult(
+                'Testing Connection',
+                'warning',
+                'Connecting to Supabase...'
+            );
+            
+            try {
+                supabase = window.supabase.createClient(url, key);
+                
+                // Try a simple query to verify connection
+                const { data, error } = await supabase
+                    .from('leaderboard_public')
+                    .select('*')
+                    .limit(1);
+                
+                if (error) throw error;
+                
+                connectionResult.className = 'step passed';
+                connectionResult.innerHTML = `
+                    <h3>✅ Connection Successful</h3>
+                    <p>Successfully connected to Supabase!</p>
+                `;
+                
+                // Check if we got any data
+                if (data && data.length > 0) {
+                    addResult(
+                        'Leaderboard Data Found',
+                        'passed',
+                        `Found ${data.length} record(s) in the leaderboard_public table. Your leaderboard is working!`
+                    );
+                } else {
+                    addResult(
+                        'No Leaderboard Data',
+                        'warning',
+                        'Connected successfully but found no records in the leaderboard_public table. This is normal if you haven\'t added any scores yet.'
+                    );
+                }
+                
+            } catch (error) {
+                connectionResult.className = 'step failed';
+                connectionResult.innerHTML = `
+                    <h3>❌ Connection Failed</h3>
+                    <p>Error: ${error.message}</p>
+                    <p>Please check your credentials and make sure your Supabase project is running.</p>
+                `;
+            }
+        }
+        
+        async function checkTables() {
+            clearResults();
+            
+            if (!supabase) {
+                addResult(
+                    'No Connection',
+                    'failed',
+                    'Please test your connection first in Step 1.'
+                );
+                return;
+            }
+            
+            const tablesResult = addResult(
+                'Checking Tables',
+                'warning',
+                'Checking if required tables and views exist...'
+            );
+            
+            try {
+                // Check if leaderboard table exists
+                const { error: tableError } = await supabase
+                    .from('leaderboard')
+                    .select('id')
+                    .limit(1);
+                
+                // Check if leaderboard_public view exists
+                const { error: viewError } = await supabase
+                    .from('leaderboard_public')
+                    .select('id')
+                    .limit(1);
+                
+                if (tableError && tableError.code === '42P01') {
+                    // Table doesn't exist
+                    tablesResult.className = 'step failed';
+                    tablesResult.innerHTML = `
+                        <h3>❌ Missing Tables</h3>
+                        <p>The 'leaderboard' table doesn't exist in your Supabase project.</p>
+                        <p>Please run the SQL script in Step 3 to create all required tables and views.</p>
+                    `;
+                    return;
+                }
+                
+                if (viewError && viewError.code === '42P01') {
+                    // View doesn't exist
+                    tablesResult.className = 'step failed';
+                    tablesResult.innerHTML = `
+                        <h3>❌ Missing Views</h3>
+                        <p>The 'leaderboard_public' view doesn't exist in your Supabase project.</p>
+                        <p>Please run the SQL script in Step 3 to create all required tables and views.</p>
+                    `;
+                    return;
+                }
+                
+                // Test insert permission
+                const testInsertResult = addResult(
+                    'Testing Insert Permission',
+                    'warning',
+                    'Checking if you can insert data into the leaderboard table...'
+                );
+                
+                try {
+                    const testData = {
+                        player_name: 'Test_' + Math.floor(Math.random() * 1000),
+                        email: 'test@example.com',
+                        score: 100,
+                        wave_reached: 1
+                    };
+                    
+                    const { error: insertError } = await supabase
+                        .from('leaderboard')
+                        .insert([testData]);
+                    
+                    if (insertError) throw insertError;
+                    
+                    testInsertResult.className = 'step passed';
+                    testInsertResult.innerHTML = `
+                        <h3>✅ Insert Permission OK</h3>
+                        <p>Successfully inserted test data into the leaderboard table.</p>
+                    `;
+                    
+                    tablesResult.className = 'step passed';
+                    tablesResult.innerHTML = `
+                        <h3>✅ Tables Check Passed</h3>
+                        <p>All required tables and views exist and are working correctly!</p>
+                    `;
+                    
+                    // Final success message
+                    addResult(
+                        'All Checks Passed',
+                        'passed',
+                        `
+                        <p>Your Supabase setup is working correctly! To fix your game:</p>
+                        <ol>
+                            <li>Copy the config code from Step 4</li>
+                            <li>Replace the entire contents of your supabase-config.js file with this code</li>
+                            <li>Refresh your game and try again</li>
+                        </ol>
+                        `
+                    );
+                    
+                } catch (insertError) {
+                    testInsertResult.className = 'step failed';
+                    testInsertResult.innerHTML = `
+                        <h3>❌ Insert Permission Failed</h3>
+                        <p>Error: ${insertError.message}</p>
+                        <p>This could be due to missing RLS policies. Please run the SQL script in Step 3 to set up the correct permissions.</p>
+                    `;
+                }
+                
+            } catch (error) {
+                tablesResult.className = 'step failed';
+                tablesResult.innerHTML = `
+                    <h3>❌ Check Failed</h3>
+                    <p>Error: ${error.message}</p>
+                    <p>An unexpected error occurred while checking tables.</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html> 

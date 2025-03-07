@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Racer AI</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script>
+        // Create a placeholder supabase object in case the library fails to load
+        window.supabase = {
+            createClient: function() {
+                console.warn("Supabase library not loaded properly. Leaderboard functionality will be disabled.");
+                return {
+                    from: function() {
+                        return {
+                            select: function() { return { data: [], error: new Error("Supabase not available") }; },
+                            insert: function() { return { error: new Error("Supabase not available") }; },
+                            order: function() { return this; },
+                            limit: function() { return this; }
+                        };
+                    }
+                };
+            }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="console.error('Failed to load Supabase library')"></script>
+    <!-- Load Supabase configuration first -->
+    <script src="supabase-config.js"></script>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #111;
+        }
+        
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 2px solid #4a90e2;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 4px;
+            font-size: 16px;
+            width: 250px;
+        }
+        
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #357abd;
+        }
+        
+        .leaderboard-table {
+            border-collapse: collapse;
+            width: 80%;
+            margin: 0 auto;
+            color: white;
+        }
+        
+        .leaderboard-table th, .leaderboard-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+        }
+        
+        .leaderboard-table th {
+            background-color: #222;
+            color: #4a90e2;
+        }
+        
+        .leaderboard-table tr:nth-child(even) {
+            background-color: rgba(50, 50, 80, 0.3);
+        }
+        
+        .leaderboard-table tr:hover {
+            background-color: rgba(74, 144, 226, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <script src="game.js"></script>
+</body>
+</html> 

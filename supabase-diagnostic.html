@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Connection Diagnostic</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .warning {
+            color: orange;
+            font-weight: bold;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        input {
+            padding: 8px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        #diagnosticResults {
+            margin-top: 20px;
+        }
+        .step {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-left: 3px solid #ddd;
+        }
+        .step.passed {
+            border-left-color: green;
+        }
+        .step.failed {
+            border-left-color: red;
+        }
+        .step.warning {
+            border-left-color: orange;
+        }
+    </style>
+</head>
+<body>
+    <h1>Supabase Connection Diagnostic</h1>
+    
+    <div class="card">
+        <h2>Current Configuration</h2>
+        <pre id="configDisplay">Loading...</pre>
+        
+        <div>
+            <button onclick="runDiagnostics()">Run Full Diagnostics</button>
+            <button onclick="testDirectConnection()">Test Direct Connection</button>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Quick Fix: Enter Your Credentials</h2>
+        <p>If you haven't set up your credentials yet, enter them here:</p>
+        
+        <label for="supabaseUrl">Supabase URL:</label>
+        <input type="text" id="supabaseUrl" placeholder="https://your-project-id.supabase.co">
+        
+        <label for="supabaseKey">Supabase Anon Key:</label>
+        <input type="text" id="supabaseKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+        
+        <button onclick="updateAndTest()">Update & Test Connection</button>
+    </div>
+    
+    <div id="diagnosticResults"></div>
+    
+    <script>
+        // Display current configuration
+        window.onload = function() {
+            displayConfig();
+        };
+        
+        function displayConfig() {
+            const configDisplay = document.getElementById('configDisplay');
+            
+            if (window.SUPABASE_CONFIG) {
+                // Create a safe copy for display
+                const displayConfig = {
+                    url: window.SUPABASE_CONFIG.url,
+                    key: maskApiKey(window.SUPABASE_CONFIG.key)
+                };
+                
+                configDisplay.textContent = JSON.stringify(displayConfig, null, 2);
+                
+                // Pre-fill the form if needed
+                if (window.SUPABASE_CONFIG.url && 
+                    window.SUPABASE_CONFIG.url !== 'YOUR_SUPABASE_URL') {
+                    document.getElementById('supabaseUrl').value = window.SUPABASE_CONFIG.url;
+                }
+            } else {
+                configDisplay.innerHTML = '<span class="error">Error: Could not load configuration from supabase-config.js</span>';
+            }
+        }
+        
+        function maskApiKey(key) {
+            if (!key) return "Not set";
+            if (key === 'YOUR_SUPABASE_ANON_KEY') return key;
+            
+            // Only show first 5 and last 5 characters
+            return key.substring(0, 5) + "..." + key.substring(key.length - 5);
+        }
+        
+        function updateAndTest() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                alert('Please enter both Supabase URL and anon key');
+                return;
+            }
+            
+            // Update the global config
+            window.SUPABASE_CONFIG = {
+                url: url,
+                key: key
+            };
+            
+            // Update display
+            displayConfig();
+            
+            // Run diagnostics
+            runDiagnostics();
+        }
+        
+        function addDiagnosticStep(id, title, status, message) {
+            const results = document.getElementById('diagnosticResults');
+            const stepDiv = document.createElement('div');
+            stepDiv.id = id;
+            stepDiv.className = `step ${status}`;
+            
+            let statusIcon = '⚠️';
+            if (status === 'passed') statusIcon = '✅';
+            if (status === 'failed') statusIcon = '❌';
+            
+            stepDiv.innerHTML = `
+                <h3>${statusIcon} ${title}</h3>
+                <p>${message}</p>
+            `;
+            
+            results.appendChild(stepDiv);
+            return stepDiv;
+        }
+        
+        function clearDiagnostics() {
+            document.getElementById('diagnosticResults').innerHTML = '';
+        }
+        
+        async function runDiagnostics() {
+            clearDiagnostics();
+            
+            // Step 1: Check if config file is loaded
+            if (!window.SUPABASE_CONFIG) {
+                addDiagnosticStep(
+                    'step1', 
+                    'Configuration File', 
+                    'failed',
+                    'The supabase-config.js file is not loaded properly. Make sure it exists and is included in your HTML before this script.'
+                );
+                return;
+            }
+            
+            // Step 2: Check if config has placeholder values
+            const configStep = addDiagnosticStep(
+                'step2',
+                'Configuration Values',
+                window.SUPABASE_CONFIG.url === 'YOUR_SUPABASE_URL' || 
+                window.SUPABASE_CONFIG.key === 'YOUR_SUPABASE_ANON_KEY' ? 'failed' : 'passed',
+                window.SUPABASE_CONFIG.url === 'YOUR_SUPABASE_URL' || 
+                window.SUPABASE_CONFIG.key === 'YOUR_SUPABASE_ANON_KEY' ? 
+                'Your configuration still has placeholder values. You need to replace them with your actual Supabase credentials.' :
+                'Configuration values are set (not using placeholders).'
+            );
+            
+            // Step 3: Check if Supabase library is loaded
+            const libraryStep = addDiagnosticStep(
+                'step3',
+                'Supabase Library',
+                window.supabase ? 'passed' : 'failed',
+                window.supabase ? 
+                'Supabase library is loaded correctly.' :
+                'Supabase library is not loaded. Make sure the script tag for Supabase is included in your HTML and the CDN is accessible.'
+            );
+            
+            // If any of the previous steps failed, stop here
+            if (window.SUPABASE_CONFIG.url === 'YOUR_SUPABASE_URL' || 
+                window.SUPABASE_CONFIG.key === 'YOUR_SUPABASE_ANON_KEY' ||
+                !window.supabase) {
+                return;
+            }
+            
+            // Step 4: Test connection
+            const connectionStep = addDiagnosticStep(
+                'step4',
+                'Connection Test',
+                'warning',
+                'Testing connection to Supabase...'
+            );
+            
+            try {
+                const supabase = window.supabase.createClient(
+                    window.SUPABASE_CONFIG.url,
+                    window.SUPABASE_CONFIG.key
+                );
+                
+                // Try to fetch a single row from the public view
+                const { data, error } = await supabase
+                    .from('leaderboard_public')
+                    .select('id')
+                    .limit(1);
+                
+                if (error) throw error;
+                
+                connectionStep.className = 'step passed';
+                connectionStep.innerHTML = `
+                    <h3>✅ Connection Test</h3>
+                    <p>Successfully connected to Supabase and queried the leaderboard_public table.</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+                // Step 5: Test insert permission
+                const insertStep = addDiagnosticStep(
+                    'step5',
+                    'Insert Permission Test',
+                    'warning',
+                    'Testing ability to insert data...'
+                );
+                
+                try {
+                    const testData = {
+                        player_name: 'Test_' + Math.floor(Math.random() * 1000),
+                        email: 'test@example.com',
+                        score: 100,
+                        wave_reached: 1
+                    };
+                    
+                    const { error: insertError } = await supabase
+                        .from('leaderboard')
+                        .insert([testData]);
+                    
+                    if (insertError) throw insertError;
+                    
+                    insertStep.className = 'step passed';
+                    insertStep.innerHTML = `
+                        <h3>✅ Insert Permission Test</h3>
+                        <p>Successfully inserted test data into the leaderboard table.</p>
+                    `;
+                    
+                    // Final success message
+                    addDiagnosticStep(
+                        'final',
+                        'All Tests Passed',
+                        'passed',
+                        'Your Supabase connection is working correctly! You should now be able to use the leaderboard functionality in your game.'
+                    );
+                    
+                } catch (insertError) {
+                    insertStep.className = 'step failed';
+                    insertStep.innerHTML = `
+                        <h3>❌ Insert Permission Test</h3>
+                        <p>Failed to insert test data. This could be due to missing tables or incorrect permissions.</p>
+                        <p>Error: ${insertError.message}</p>
+                        <p>Make sure you've run the SQL setup scripts to create the necessary tables and set up RLS policies.</p>
+                    `;
+                }
+                
+            } catch (error) {
+                connectionStep.className = 'step failed';
+                connectionStep.innerHTML = `
+                    <h3>❌ Connection Test</h3>
+                    <p>Failed to connect to Supabase or query the leaderboard_public table.</p>
+                    <p>Error: ${error.message}</p>
+                    <p>Possible causes:</p>
+                    <ul>
+                        <li>Incorrect URL or API key</li>
+                        <li>The leaderboard_public table doesn't exist (you need to run the SQL setup scripts)</li>
+                        <li>Network connectivity issues</li>
+                        <li>CORS issues (if testing locally)</li>
+                    </ul>
+                `;
+            }
+        }
+        
+        async function testDirectConnection() {
+            clearDiagnostics();
+            
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                alert('Please enter both Supabase URL and anon key in the Quick Fix section');
+                return;
+            }
+            
+            const connectionStep = addDiagnosticStep(
+                'direct-test',
+                'Direct Connection Test',
+                'warning',
+                'Testing direct connection to Supabase with provided credentials...'
+            );
+            
+            try {
+                const supabase = window.supabase.createClient(url, key);
+                
+                // Try to fetch a single row from the public view
+                const { data, error } = await supabase
+                    .from('leaderboard_public')
+                    .select('id')
+                    .limit(1);
+                
+                if (error) throw error;
+                
+                connectionStep.className = 'step passed';
+                connectionStep.innerHTML = `
+                    <h3>✅ Direct Connection Test</h3>
+                    <p>Successfully connected to Supabase using the credentials you provided.</p>
+                    <p>This confirms your credentials are correct. Now update your supabase-config.js file with these values.</p>
+                `;
+                
+                // Add instructions for updating the config file
+                addDiagnosticStep(
+                    'update-instructions',
+                    'Update Your Config File',
+                    'passed',
+                    `
+                    <p>Your credentials work! Now you need to update your supabase-config.js file with these values:</p>
+                    <pre>
+const SUPABASE_CONFIG = {
+  url: '${url}',
+  key: '${key}'
+};
+                    </pre>
+                    <p>Replace the entire content of your supabase-config.js file with the above.</p>
+                    `
+                );
+                
+            } catch (error) {
+                connectionStep.className = 'step failed';
+                connectionStep.innerHTML = `
+                    <h3>❌ Direct Connection Test</h3>
+                    <p>Failed to connect to Supabase with the provided credentials.</p>
+                    <p>Error: ${error.message}</p>
+                    <p>Please double-check your Supabase URL and anon key.</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html> 

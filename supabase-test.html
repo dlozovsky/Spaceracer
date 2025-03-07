@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Connection Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Load Supabase configuration -->
+    <script src="supabase-config.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        input {
+            padding: 8px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            background-color: #f1f1f1;
+            margin-right: 5px;
+        }
+        .tab.active {
+            background-color: #4a90e2;
+            color: white;
+            border-color: #4a90e2;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Supabase Connection Test</h1>
+    
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('config-tab')">Configuration</div>
+        <div class="tab" onclick="showTab('test-tab')">Test Connection</div>
+        <div class="tab" onclick="showTab('submit-tab')">Submit Score</div>
+    </div>
+    
+    <div id="config-tab" class="tab-content active">
+        <h2>Supabase Configuration</h2>
+        <div class="card">
+            <p>Current configuration from <code>supabase-config.js</code>:</p>
+            <pre id="current-config">Loading...</pre>
+            
+            <h3>Update Configuration</h3>
+            <p>Enter your Supabase credentials to update the configuration file:</p>
+            
+            <label for="configUrl">Supabase URL:</label>
+            <input type="text" id="configUrl" placeholder="https://your-project-id.supabase.co">
+            
+            <label for="configKey">Supabase Anon Key:</label>
+            <input type="text" id="configKey" placeholder="your-anon-key">
+            
+            <button onclick="updateConfigFile()">Update Config File</button>
+            <p id="updateStatus"></p>
+            
+            <div class="card">
+                <h4>How to get your Supabase credentials:</h4>
+                <ol>
+                    <li>Go to your Supabase project dashboard</li>
+                    <li>Click on "Settings" (gear icon) in the left sidebar</li>
+                    <li>Click on "API" in the settings menu</li>
+                    <li>Copy your "Project URL" and "anon/public" key</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    
+    <div id="test-tab" class="tab-content">
+        <h2>Test Connection</h2>
+        <div class="card">
+            <p>Test your Supabase connection using the credentials from <code>supabase-config.js</code>:</p>
+            <button onclick="testConnection()">Test Connection</button>
+            
+            <div id="connectionStatus"></div>
+            <h3>Leaderboard Data:</h3>
+            <pre id="leaderboardData">Not fetched yet</pre>
+        </div>
+    </div>
+    
+    <div id="submit-tab" class="tab-content">
+        <h2>Test Score Submission</h2>
+        <div class="card">
+            <label for="playerName">Player Name:</label>
+            <input type="text" id="playerName" placeholder="Your Name">
+            
+            <label for="playerEmail">Email:</label>
+            <input type="email" id="playerEmail" placeholder="your.email@example.com">
+            
+            <label for="playerScore">Score:</label>
+            <input type="number" id="playerScore" value="1000">
+            
+            <label for="waveReached">Wave Reached:</label>
+            <input type="number" id="waveReached" value="5">
+            
+            <button onclick="submitTestScore()">Submit Test Score</button>
+            <div id="submissionStatus"></div>
+        </div>
+    </div>
+    
+    <script>
+        let supabase = null;
+        
+        // Load and display current config
+        window.onload = function() {
+            displayCurrentConfig();
+        };
+        
+        function displayCurrentConfig() {
+            const configDisplay = document.getElementById('current-config');
+            
+            if (window.SUPABASE_CONFIG) {
+                // Create a copy of the config to display (with partial key for security)
+                const displayConfig = {
+                    url: window.SUPABASE_CONFIG.url,
+                    key: maskApiKey(window.SUPABASE_CONFIG.key)
+                };
+                
+                configDisplay.textContent = JSON.stringify(displayConfig, null, 2);
+                
+                // Pre-fill the form fields
+                document.getElementById('configUrl').value = window.SUPABASE_CONFIG.url;
+                // Don't pre-fill the key for security reasons
+            } else {
+                configDisplay.textContent = "Error: Could not load configuration from supabase-config.js";
+            }
+        }
+        
+        function maskApiKey(key) {
+            if (!key) return "Not set";
+            if (key === 'YOUR_SUPABASE_ANON_KEY') return key;
+            
+            // Only show first 5 and last 5 characters
+            return key.substring(0, 5) + "..." + key.substring(key.length - 5);
+        }
+        
+        function updateConfigFile() {
+            const url = document.getElementById('configUrl').value;
+            const key = document.getElementById('configKey').value;
+            const updateStatus = document.getElementById('updateStatus');
+            
+            if (!url || !key) {
+                updateStatus.innerHTML = '<p class="error">Please enter both Supabase URL and Anon Key</p>';
+                return;
+            }
+            
+            // In a real application, you would send this to a server endpoint
+            // that would update the file. For this demo, we'll just update the
+            // in-memory configuration.
+            
+            // Update the global config
+            window.SUPABASE_CONFIG.url = url;
+            window.SUPABASE_CONFIG.key = key;
+            
+            // Display the updated config
+            displayCurrentConfig();
+            
+            updateStatus.innerHTML = '<p class="success">Configuration updated in memory. Note: In a real application, this would update the supabase-config.js file.</p>';
+            
+            // Reset Supabase client with new config
+            initializeSupabase();
+        }
+        
+        function showTab(tabId) {
+            // Hide all tab contents
+            const tabContents = document.getElementsByClassName('tab-content');
+            for (let i = 0; i < tabContents.length; i++) {
+                tabContents[i].classList.remove('active');
+            }
+            
+            // Deactivate all tabs
+            const tabs = document.getElementsByClassName('tab');
+            for (let i = 0; i < tabs.length; i++) {
+                tabs[i].classList.remove('active');
+            }
+            
+            // Show the selected tab content
+            document.getElementById(tabId).classList.add('active');
+            
+            // Activate the clicked tab
+            event.currentTarget.classList.add('active');
+        }
+        
+        function initializeSupabase() {
+            try {
+                if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+                    supabase = window.supabase.createClient(
+                        window.SUPABASE_CONFIG.url,
+                        window.SUPABASE_CONFIG.key
+                    );
+                    console.log("Supabase initialized with config from supabase-config.js");
+                    return true;
+                } else {
+                    console.error("Invalid Supabase configuration");
+                    return false;
+                }
+            } catch (error) {
+                console.error('Supabase initialization error:', error);
+                return false;
+            }
+        }
+        
+        function testConnection() {
+            const connectionStatus = document.getElementById('connectionStatus');
+            
+            if (!initializeSupabase()) {
+                connectionStatus.innerHTML = '<p class="error">Failed to initialize Supabase. Check your configuration.</p>';
+                return;
+            }
+            
+            connectionStatus.innerHTML = '<p class="success">Supabase client initialized successfully!</p>';
+            
+            // Test fetching leaderboard data
+            fetchLeaderboard();
+        }
+        
+        async function fetchLeaderboard() {
+            const leaderboardData = document.getElementById('leaderboardData');
+            
+            if (!supabase) {
+                leaderboardData.textContent = 'Supabase not initialized';
+                return;
+            }
+            
+            try {
+                const { data, error } = await supabase
+                    .from('leaderboard_public')
+                    .select('*')
+                    .order('score', { ascending: false })
+                    .limit(10);
+                
+                if (error) throw error;
+                
+                leaderboardData.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                leaderboardData.textContent = `Error fetching leaderboard: ${error.message}`;
+                console.error('Leaderboard fetch error:', error);
+            }
+        }
+        
+        async function submitTestScore() {
+            if (!initializeSupabase()) {
+                document.getElementById('submissionStatus').innerHTML = 
+                    '<p class="error">Failed to initialize Supabase. Check your configuration.</p>';
+                return;
+            }
+            
+            const playerName = document.getElementById('playerName').value;
+            const playerEmail = document.getElementById('playerEmail').value;
+            const playerScore = parseInt(document.getElementById('playerScore').value);
+            const waveReached = parseInt(document.getElementById('waveReached').value);
+            const submissionStatus = document.getElementById('submissionStatus');
+            
+            if (!playerName || !playerEmail) {
+                submissionStatus.innerHTML = '<p class="error">Please enter both name and email</p>';
+                return;
+            }
+            
+            try {
+                const { error } = await supabase
+                    .from('leaderboard')
+                    .insert([{ 
+                        player_name: playerName, 
+                        email: playerEmail, 
+                        score: playerScore,
+                        wave_reached: waveReached
+                    }]);
+                
+                if (error) throw error;
+                
+                submissionStatus.innerHTML = '<p class="success">Score submitted successfully!</p>';
+                
+                // Switch to the test tab and refresh leaderboard
+                showTab('test-tab');
+                document.querySelector('.tab:nth-child(2)').classList.add('active');
+                fetchLeaderboard();
+            } catch (error) {
+                submissionStatus.innerHTML = `<p class="error">Error submitting score: ${error.message}</p>`;
+                console.error('Score submission error:', error);
+            }
+        }
+    </script>
+</body>
+</html> 

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Supabase Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        input {
+            padding: 8px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .loading {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <h1>Simple Supabase Test</h1>
+    
+    <div>
+        <label for="supabaseUrl">Supabase URL:</label>
+        <input type="text" id="supabaseUrl" placeholder="https://your-project-id.supabase.co">
+        
+        <label for="supabaseKey">Supabase Anon Key:</label>
+        <input type="text" id="supabaseKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+        
+        <button onclick="testConnection()">Test Connection</button>
+        <button onclick="createTables()">Create Tables</button>
+        <button onclick="updateConfigFile()">Update Config File</button>
+    </div>
+    
+    <div id="status"></div>
+    <pre id="output"></pre>
+    
+    <script>
+        // Set status message
+        function setStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = type;
+        }
+        
+        // Set output
+        function setOutput(data) {
+            document.getElementById('output').textContent = 
+                typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+        }
+        
+        // Test connection
+        async function testConnection() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                setStatus('Please enter both Supabase URL and anon key', 'error');
+                return;
+            }
+            
+            setStatus('Testing connection...', 'loading');
+            setOutput('');
+            
+            try {
+                console.log('Creating Supabase client...');
+                const supabase = window.supabase.createClient(url, key);
+                
+                console.log('Testing connection...');
+                const { data, error } = await supabase.from('leaderboard_public').select('*').limit(1);
+                
+                if (error) {
+                    if (error.code === '42P01') {
+                        setStatus('Connection successful, but the leaderboard_public table does not exist. Click "Create Tables" to set up the database.', 'error');
+                    } else {
+                        throw error;
+                    }
+                } else {
+                    setStatus('Connection successful!', 'success');
+                    setOutput(data);
+                }
+            } catch (error) {
+                console.error('Connection error:', error);
+                setStatus(`Connection failed: ${error.message}`, 'error');
+                setOutput(error);
+            }
+        }
+        
+        // Create tables
+        async function createTables() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                setStatus('Please enter both Supabase URL and anon key', 'error');
+                return;
+            }
+            
+            setStatus('Creating tables...', 'loading');
+            setOutput('');
+            
+            try {
+                const supabase = window.supabase.createClient(url, key);
+                
+                // We'll use the REST API to execute SQL directly
+                const response = await fetch(`${url}/rest/v1/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': key,
+                        'Authorization': `Bearer ${key}`,
+                        'Prefer': 'return=minimal'
+                    },
+                    body: JSON.stringify({
+                        query: `
+                        -- Create the main leaderboard table
+                        CREATE TABLE IF NOT EXISTS leaderboard (
+                            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                            player_name TEXT NOT NULL,
+                            email TEXT NOT NULL,
+                            score INTEGER NOT NULL,
+                            wave_reached INTEGER NOT NULL
+                        );
+                        
+                        -- Create a public view of the leaderboard that excludes email addresses
+                        CREATE OR REPLACE VIEW leaderboard_public AS
+                        SELECT 
+                            id,
+                            created_at,
+                            player_name,
+                            score,
+                            wave_reached
+                        FROM 
+                            leaderboard
+                        ORDER BY 
+                            score DESC;
+                        
+                        -- Enable Row Level Security on the leaderboard table
+                        ALTER TABLE leaderboard ENABLE ROW LEVEL SECURITY;
+                        
+                        -- Create RLS policies
+                        DROP POLICY IF EXISTS "Allow public read access" ON leaderboard;
+                        CREATE POLICY "Allow public read access" 
+                        ON leaderboard 
+                        FOR SELECT 
+                        USING (true);
+                        
+                        DROP POLICY IF EXISTS "Allow public insert access" ON leaderboard;
+                        CREATE POLICY "Allow public insert access" 
+                        ON leaderboard 
+                        FOR INSERT 
+                        WITH CHECK (true);
+                        `
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`SQL execution failed: ${JSON.stringify(errorData)}`);
+                }
+                
+                setStatus('Tables created successfully! Try testing the connection again.', 'success');
+                
+                // Insert sample data
+                const { error } = await supabase
+                    .from('leaderboard')
+                    .insert([
+                        { player_name: 'SpaceMaster', email: 'sample1@example.com', score: 5000, wave_reached: 10 },
+                        { player_name: 'StarRacer', email: 'sample2@example.com', score: 4500, wave_reached: 9 }
+                    ]);
+                
+                if (error) {
+                    console.warn('Warning: Could not insert sample data:', error);
+                    setOutput(`Tables created, but could not insert sample data: ${error.message}`);
+                } else {
+                    setOutput('Tables created and sample data inserted successfully!');
+                }
+                
+            } catch (error) {
+                console.error('Error creating tables:', error);
+                setStatus(`Failed to create tables: ${error.message}`, 'error');
+                setOutput(error);
+            }
+        }
+        
+        // Update config file
+        function updateConfigFile() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                setStatus('Please enter both Supabase URL and anon key', 'error');
+                return;
+            }
+            
+            const configCode = `/**
+ * Supabase Configuration
+ * 
+ * This file contains your Supabase project credentials.
+ */
+
+const SUPABASE_CONFIG = {
+  url: '${url}',
+  key: '${key}'
+};
+
+// Don't modify below this line
+(function() {
+  // Make the config available globally
+  window.SUPABASE_CONFIG = SUPABASE_CONFIG;
+})();`;
+            
+            // Copy to clipboard
+            navigator.clipboard.writeText(configCode)
+                .then(() => {
+                    setStatus('Config code copied to clipboard! Paste this into your supabase-config.js file.', 'success');
+                    setOutput(configCode);
+                })
+                .catch(err => {
+                    setStatus(`Failed to copy: ${err}`, 'error');
+                    setOutput(configCode);
+                });
+        }
+    </script>
+</body>
+</html> 
