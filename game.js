@@ -48,15 +48,49 @@ function setup() {
     radius: 15
   };
   
+  // Check if we have a submitted score in localStorage
+  try {
+    const savedScoreSubmitted = localStorage.getItem('scoreSubmitted');
+    const savedGameState = localStorage.getItem('submittedGameState');
+    
+    if (savedScoreSubmitted === 'true') {
+      console.log("Found saved score submission state in localStorage");
+      scoreSubmitted = true;
+      
+      if (savedGameState === 'gameover') {
+        gameState = "gameover";
+      }
+    }
+  } catch (e) {
+    console.error("Could not retrieve score submission state from localStorage:", e);
+  }
+  
   // Initialize Supabase client using the external config
   try {
     // Check if the config is available
     if (window.SUPABASE_CONFIG) {
+      console.log("Supabase config found:", {
+        url: window.SUPABASE_CONFIG.url ? "URL exists" : "URL missing",
+        key: window.SUPABASE_CONFIG.key ? "Key exists" : "Key missing"
+      });
+      
       supabase = window.supabase.createClient(
         window.SUPABASE_CONFIG.url, 
         window.SUPABASE_CONFIG.key
       );
       console.log("Supabase initialized successfully");
+      
+      // Test the connection
+      supabase.from('leaderboard').select('count', { count: 'exact', head: true })
+        .then(response => {
+          console.log("Supabase connection test:", response.error ? "Failed" : "Successful");
+          if (response.error) {
+            console.error("Supabase connection test error:", response.error);
+          }
+        })
+        .catch(error => {
+          console.error("Supabase connection test error:", error);
+        });
     } else {
       console.error("Supabase config not found. Make sure supabase-config.js is loaded before game.js");
       supabase = null;
@@ -81,6 +115,26 @@ function resetGame() {
   isBossFight = false;
   bossDefeated = false;
   scoreSubmitted = false;
+  
+  // Initialize the flag to prevent game restart during score submission
+  window.preventGameRestart = false;
+  
+  // Reset input fields
+  playerNameInput = '';
+  playerEmailInput = '';
+  activeInput = null;
+  inputActive = false;
+  leaderboardError = '';
+  
+  // Clear localStorage
+  try {
+    localStorage.removeItem('scoreSubmitted');
+    localStorage.removeItem('submittedGameState');
+    localStorage.removeItem('currentScreen');
+    localStorage.removeItem('gameState');
+  } catch (e) {
+    console.error("Could not clear localStorage:", e);
+  }
   
   // Generate background stars
   stars = [];
@@ -137,12 +191,23 @@ function draw() {
     if (particleEffects[i].isDone()) particleEffects.splice(i, 1);
   }
   
+  // If a score has been submitted, ensure we stay in game over state
+  if (scoreSubmitted && gameState !== "gameover") {
+    console.log("Score submitted but not in game over state, correcting");
+    gameState = "gameover";
+  }
+  
   if (gameState === "start") {
     drawStartScreen();
+    // Don't allow score submission in start screen
+    showScoreSubmission = false;
   } else if (gameState === "play") {
     playGame();
+    // Don't allow score submission during gameplay
+    showScoreSubmission = false;
   } else if (gameState === "gameover") {
     drawGameOverScreen();
+    // Score submission is allowed in game over state
   }
   
   // Always draw help icon
@@ -153,7 +218,8 @@ function draw() {
     drawHelpScreen();
   } else if (showLeaderboard) {
     drawLeaderboard();
-  } else if (showScoreSubmission) {
+  } else if (showScoreSubmission && gameState === "gameover") {
+    // Only show score submission form in game over state
     drawScoreSubmissionForm();
   }
   
@@ -174,9 +240,15 @@ function drawStartScreen() {
   drawButton("View Leaderboard", width / 2, height / 2 + 120, 200, 40, () => {
     showLeaderboard = true;
     showHelp = false;
+    // Explicitly prevent score submission form from appearing
     showScoreSubmission = false;
     fetchLeaderboard();
-  });
+  }, 'leaderboard');
+  
+  // Ensure we're in the start state
+  gameState = "start";
+  // Reset score submission flag
+  scoreSubmitted = false;
 }
 
 function drawGameOverScreen() {
@@ -189,13 +261,22 @@ function drawGameOverScreen() {
   text(`Final Score: ${score}`, width / 2, height / 2 - 50);
   text(`Waves Completed: ${wave - 1}`, width / 2, height / 2 - 20);
   
+  // Ensure we're in game over state
+  gameState = "gameover";
+  
   // Show submit score button if score not yet submitted
   if (!scoreSubmitted) {
     drawButton("Submit Score", width / 2, height / 2 + 20, 200, 40, () => {
+      console.log("Submit Score button clicked from game over screen");
       showScoreSubmission = true;
-      playerNameInput = '';
-      playerEmailInput = '';
-    });
+      // Explicitly ensure we stay in game over state
+      gameState = "gameover";
+      // Don't clear player name if it's already set
+      if (!playerNameInput) playerNameInput = '';
+      if (!playerEmailInput) playerEmailInput = '';
+      // Ensure help screen is closed
+      showHelp = false;
+    }, 'leaderboard');
   } else {
     fill(0, 255, 0);
     text("Score Submitted!", width / 2, height / 2 + 20);
@@ -203,15 +284,40 @@ function drawGameOverScreen() {
   
   // View leaderboard button
   drawButton("View Leaderboard", width / 2, height / 2 + 70, 200, 40, () => {
+    console.log("View Leaderboard button clicked from game over screen");
+    
+    // Explicitly set flags to ensure correct behavior
     showLeaderboard = true;
+    showScoreSubmission = false;
+    showHelp = false;
+    
+    // Force game state to remain in game over
+    gameState = "gameover";
+    
+    // Store state in localStorage to ensure persistence
+    try {
+      localStorage.setItem('currentScreen', 'leaderboard');
+      localStorage.setItem('gameState', 'gameover');
+      localStorage.setItem('fromGameOver', 'true');
+    } catch (e) {
+      console.error("Could not store screen state in localStorage:", e);
+    }
+    
+    // Fetch leaderboard data
     fetchLeaderboard();
-  });
+  }, 'leaderboard'); // Add a special button type for leaderboard
   
   // Play again button
   drawButton("Play Again", width / 2, height / 2 + 120, 200, 40, () => {
+    console.log("Play Again button clicked, resetting game");
     gameState = "play";
     resetGame();
-  });
+    // Reset all overlay flags
+    showHelp = false;
+    showLeaderboard = false;
+    showScoreSubmission = false;
+    scoreSubmitted = false;
+  }, 'leaderboard');
 }
 
 function drawScoreSubmissionForm() {
@@ -220,6 +326,60 @@ function drawScoreSubmissionForm() {
   fill(0, 0, 30, 220);
   rect(0, 0, width, height);
   
+  // If not in game over state, show a message and play button instead
+  if (gameState !== "gameover") {
+    // Form title
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textSize(36);
+    text("Ready to Play?", width/2, height/2 - 60);
+    
+    // Play button
+    const playButtonX = width/2;
+    const playButtonY = height/2 + 20;
+    const playButtonWidth = 200;
+    const playButtonHeight = 50;
+    
+    // Check if mouse is over play button
+    const isPlayHovered = mouseX > playButtonX - playButtonWidth/2 && 
+                         mouseX < playButtonX + playButtonWidth/2 && 
+                         mouseY > playButtonY - playButtonHeight/2 && 
+                         mouseY < playButtonY + playButtonHeight/2;
+    
+    // Draw play button with hover effect
+    if (isPlayHovered) {
+      fill(80, 180, 80); // Brighter green when hovered
+      stroke(255);
+      strokeWeight(2);
+    } else {
+      fill(60, 160, 60); // Dark green
+      noStroke();
+    }
+    
+    // Draw the button
+    rect(playButtonX - playButtonWidth/2, playButtonY - playButtonHeight/2, 
+         playButtonWidth, playButtonHeight, 5);
+    
+    // Draw button text
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textSize(24);
+    text("START GAME", playButtonX, playButtonY);
+    
+    // Store the play button in a global variable for mousePressed
+    window.playButton = {
+      x: playButtonX,
+      y: playButtonY,
+      width: playButtonWidth,
+      height: playButtonHeight,
+      isHovered: isPlayHovered
+    };
+    
+    pop();
+    return;
+  }
+  
+  // Normal score submission form (only shown in game over state)
   // Form title
   fill(255);
   textAlign(CENTER, TOP);
@@ -240,15 +400,88 @@ function drawScoreSubmissionForm() {
   drawInputField("name", width/2, 200, playerNameInput);
   drawInputField("email", width/2, 250, playerEmailInput);
   
-  // Submit button
-  drawButton("Submit", width/2, 320, 150, 40, submitScore);
+  // SUBMIT BUTTON - COMPLETELY NEW IMPLEMENTATION
+  const submitBtnX = width/2;
+  const submitBtnY = 320;
+  const submitBtnWidth = 150;
+  const submitBtnHeight = 40;
   
-  // Cancel button
-  drawButton("Cancel", width/2, 370, 150, 40, () => {
-    showScoreSubmission = false;
-  });
+  // Check if mouse is over button
+  const isSubmitHovered = mouseX > submitBtnX - submitBtnWidth/2 && 
+                         mouseX < submitBtnX + submitBtnWidth/2 && 
+                         mouseY > submitBtnY - submitBtnHeight/2 && 
+                         mouseY < submitBtnY + submitBtnHeight/2;
   
-  // Error message if any
+  // Draw button with hover effect
+  if (isSubmitHovered) {
+    fill(100, 255, 100); // Bright green when hovered
+    stroke(255);
+    strokeWeight(2);
+  } else {
+    fill(60, 180, 60); // Darker green
+    noStroke();
+  }
+  
+  // Draw the button
+  rect(submitBtnX - submitBtnWidth/2, submitBtnY - submitBtnHeight/2, submitBtnWidth, submitBtnHeight, 5);
+  
+  // Draw label
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(16);
+  text("SUBMIT", submitBtnX, submitBtnY);
+  
+  // Store the button in a global variable for mousePressed
+  window.submitScoreButton = {
+    x: submitBtnX,
+    y: submitBtnY,
+    width: submitBtnWidth,
+    height: submitBtnHeight,
+    isHovered: isSubmitHovered,
+    action: "submit"
+  };
+  
+  // CANCEL BUTTON - COMPLETELY NEW IMPLEMENTATION
+  const cancelBtnX = width/2;
+  const cancelBtnY = 370;
+  const cancelBtnWidth = 150;
+  const cancelBtnHeight = 40;
+  
+  // Check if mouse is over button
+  const isCancelHovered = mouseX > cancelBtnX - cancelBtnWidth/2 && 
+                         mouseX < cancelBtnX + cancelBtnWidth/2 && 
+                         mouseY > cancelBtnY - cancelBtnHeight/2 && 
+                         mouseY < cancelBtnY + cancelBtnHeight/2;
+  
+  // Draw button with hover effect
+  if (isCancelHovered) {
+    fill(255, 215, 0); // Bright gold when hovered
+    stroke(255);
+    strokeWeight(2);
+  } else {
+    fill(218, 165, 32); // Darker gold
+    noStroke();
+  }
+  
+  // Draw the button
+  rect(cancelBtnX - cancelBtnWidth/2, cancelBtnY - cancelBtnHeight/2, cancelBtnWidth, cancelBtnHeight, 5);
+  
+  // Draw label
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(16);
+  text("Cancel", cancelBtnX, cancelBtnY);
+  
+  // Store the button in a global variable for mousePressed
+  window.cancelScoreButton = {
+    x: cancelBtnX,
+    y: cancelBtnY,
+    width: cancelBtnWidth,
+    height: cancelBtnHeight,
+    isHovered: isCancelHovered
+  };
+  
+  // Display error message if any
   if (leaderboardError) {
     fill(255, 0, 0);
     textAlign(CENTER, CENTER);
@@ -332,47 +565,42 @@ function drawLeaderboard() {
     fetchLeaderboard();
   }, 'refresh');
   
-  // Direct close button implementation
-  // Define close button dimensions
-  const closeButtonX = width/2;
-  const closeButtonY = height - 80;
-  const closeButtonWidth = 150;
-  const closeButtonHeight = 40;
-  
-  // Check if mouse is over close button
-  const isCloseHovered = mouseX > closeButtonX - closeButtonWidth/2 && 
-                         mouseX < closeButtonX + closeButtonWidth/2 && 
-                         mouseY > closeButtonY - closeButtonHeight/2 && 
-                         mouseY < closeButtonY + closeButtonHeight/2;
-  
-  // Draw close button with hover effect
-  if (isCloseHovered) {
-    fill(255, 80, 80); // Brighter red when hovered
-    stroke(255);
-    strokeWeight(2);
-  } else {
-    fill(220, 60, 60); // Dark red
-    noStroke();
-  }
-  
-  // Draw the button
-  rect(closeButtonX - closeButtonWidth/2, closeButtonY - closeButtonHeight/2, 
-       closeButtonWidth, closeButtonHeight, 5);
-  
-  // Draw button text
-  fill(255);
-  textAlign(CENTER, CENTER);
-  textSize(16);
-  text("CLOSE", closeButtonX, closeButtonY);
-  
-  // Store the close button in a global variable for mousePressed
-  window.leaderboardCloseButton = {
-    x: closeButtonX,
-    y: closeButtonY,
-    width: closeButtonWidth,
-    height: closeButtonHeight,
-    isHovered: isCloseHovered
-  };
+  // Use standard button for close instead of direct implementation
+  drawButton("Return to Game", width/2, height - 80, 150, 40, () => {
+    console.log("Leaderboard close button clicked via standard button");
+    showLeaderboard = false;
+    
+    // Check localStorage for saved game state
+    try {
+      const fromGameOver = localStorage.getItem('fromGameOver');
+      if (fromGameOver === 'true') {
+        console.log("Returning to game over screen from leaderboard");
+        gameState = "gameover";
+        localStorage.removeItem('fromGameOver');
+      }
+    } catch (e) {
+      console.error("Could not retrieve game state from localStorage:", e);
+    }
+    
+    // Always ensure we return to game over screen if score was submitted
+    if (scoreSubmitted) {
+      console.log("Score was submitted, forcing return to game over screen");
+      gameState = "gameover";
+      showScoreSubmission = false;
+    } else if (gameState === "start") {
+      console.log("Returning to start screen");
+    } else {
+      console.log("Returning to previous screen, setting to gameover");
+      gameState = "gameover"; // Default to gameover if unsure
+    }
+    
+    // Store state in localStorage
+    try {
+      localStorage.setItem('currentScreen', 'gameover');
+    } catch (e) {
+      console.error("Could not store screen state in localStorage:", e);
+    }
+  }, 'close');
   
   pop();
 }
@@ -431,6 +659,10 @@ function drawButton(label, x, y, width, height, onClick, buttonType = 'default')
   const isHovered = mouseX > x - width/2 && mouseX < x + width/2 && 
                     mouseY > y - height/2 && mouseY < y + height/2;
   
+  if (label === "SUBMIT" && isHovered) {
+    console.log("Submit button hovered in drawButton");
+  }
+  
   // Draw button with different styles based on type
   if (buttonType === 'close') {
     // Red close button
@@ -450,6 +682,26 @@ function drawButton(label, x, y, width, height, onClick, buttonType = 'default')
       strokeWeight(2);
     } else {
       fill(60, 140, 220); // Dark blue
+      noStroke();
+    }
+  } else if (buttonType === 'leaderboard') {
+    // Gold leaderboard button
+    if (isHovered) {
+      fill(255, 215, 0); // Bright gold when hovered
+      stroke(255);
+      strokeWeight(2);
+    } else {
+      fill(218, 165, 32); // Darker gold
+      noStroke();
+    }
+  } else if (buttonType === 'submit') {
+    // Green submit button
+    if (isHovered) {
+      fill(100, 255, 100); // Bright green when hovered
+      stroke(255);
+      strokeWeight(2);
+    } else {
+      fill(60, 180, 60); // Darker green
       noStroke();
     }
   } else {
@@ -472,51 +724,57 @@ function drawButton(label, x, y, width, height, onClick, buttonType = 'default')
   
   // Store onClick handler for mousePressed, but only if no other button is already hovered
   if (isHovered && !this.hoveredButton) {
+    console.log(`Setting hoveredButton for: ${label}`);
     this.hoveredButton = onClick;
+    
+    // Store button type for debugging
+    this.hoveredButtonType = buttonType;
   }
 }
 
 function mousePressed() {
-  // Store the current hovered button before any other checks
-  const currentHoveredButton = this.hoveredButton;
+  console.log("Mouse pressed at:", mouseX, mouseY);
   
-  // Clear the hoveredButton immediately to prevent double-clicks
-  this.hoveredButton = null;
-  
-  // Check if help icon was clicked first
-  if (dist(mouseX, mouseY, helpIcon.x, helpIcon.y) < helpIcon.radius) {
-    // Toggle help screen
-    showHelp = !showHelp;
-    
-    // If opening help, close other overlays
-    if (showHelp) {
-      showLeaderboard = false;
-      showScoreSubmission = false;
-    }
-    
-    return false;
-  }
-  
-  // Check for leaderboard close button click
-  if (showLeaderboard && window.leaderboardCloseButton) {
-    const btn = window.leaderboardCloseButton;
-    if (mouseX > btn.x - btn.width/2 && mouseX < btn.x + btn.width/2 && 
-        mouseY > btn.y - btn.height/2 && mouseY < btn.y + btn.height/2) {
-      console.log("Leaderboard close button clicked");
-      showLeaderboard = false;
-      return false;
-    }
-  }
-  
-  // Handle button clicks using the stored reference
-  if (currentHoveredButton) {
-    // Call the button function
-    currentHoveredButton();
-    return false;
-  }
-  
-  // Check input fields
+  // Check for score submission buttons first
   if (showScoreSubmission) {
+    // Check for submit button click
+    if (window.submitScoreButton) {
+      const btn = window.submitScoreButton;
+      if (mouseX > btn.x - btn.width/2 && mouseX < btn.x + btn.width/2 && 
+          mouseY > btn.y - btn.height/2 && mouseY < btn.y + btn.height/2) {
+        console.log("Submit score button clicked");
+        
+        // Prevent the game from restarting
+        window.preventGameRestart = true;
+        
+        // Force game state to remain in game over
+        gameState = "gameover";
+        
+        // Call submitScore directly
+        submitScore();
+        
+        return false;
+      }
+    }
+    
+    // Check for cancel button click
+    if (window.cancelScoreButton) {
+      const btn = window.cancelScoreButton;
+      if (mouseX > btn.x - btn.width/2 && mouseX < btn.x + btn.width/2 && 
+          mouseY > btn.y - btn.height/2 && mouseY < btn.y + btn.height/2) {
+        console.log("Cancel button clicked");
+        
+        // Close the score submission form
+        showScoreSubmission = false;
+        
+        // Ensure help screen is closed
+        showHelp = false;
+        
+        return false;
+      }
+    }
+    
+    // Check input fields
     // Name input field
     if (mouseX > width/2 - 150 && mouseX < width/2 + 150 && 
         mouseY > 180 && mouseY < 220) {
@@ -536,6 +794,134 @@ function mousePressed() {
     // Click outside inputs deactivates them
     activeInput = null;
     inputActive = false;
+    
+    // If we're in the score submission screen, don't process any other clicks
+    return false;
+  }
+  
+  // Check if help icon was clicked
+  if (dist(mouseX, mouseY, helpIcon.x, helpIcon.y) < helpIcon.radius) {
+    console.log("Help icon clicked");
+    // Toggle help screen
+    showHelp = !showHelp;
+    
+    // If opening help, close other overlays
+    if (showHelp) {
+      showLeaderboard = false;
+      showScoreSubmission = false;
+    }
+    
+    return false;
+  }
+  
+  // Check for play button click in game over screen
+  if (gameState === "gameover" && !showScoreSubmission && !showLeaderboard) {
+    // Check for "Submit Score" button
+    if (mouseX > width/2 - 100 && mouseX < width/2 + 100 && 
+        mouseY > height/2 + 20 - 20 && mouseY < height/2 + 20 + 20) {
+      console.log("Submit Score button clicked from game over screen");
+      showScoreSubmission = true;
+      // Explicitly ensure we stay in game over state
+      gameState = "gameover";
+      // Don't clear player name if it's already set
+      if (!playerNameInput) playerNameInput = '';
+      if (!playerEmailInput) playerEmailInput = '';
+      // Ensure help screen is closed
+      showHelp = false;
+      return false;
+    }
+    
+    // Check for "View Leaderboard" button in game over screen
+    if (mouseX > width/2 - 100 && mouseX < width/2 + 100 && 
+        mouseY > height/2 + 70 - 20 && mouseY < height/2 + 70 + 20) {
+      console.log("View Leaderboard button clicked from game over screen");
+      
+      // Explicitly set flags to ensure correct behavior
+      showLeaderboard = true;
+      showScoreSubmission = false;
+      showHelp = false;
+      
+      // Force game state to remain in game over
+      gameState = "gameover";
+      
+      // Fetch leaderboard data
+      fetchLeaderboard();
+      return false;
+    }
+    
+    // Check for "Play Again" button
+    if (mouseX > width/2 - 100 && mouseX < width/2 + 100 && 
+        mouseY > height/2 + 120 - 20 && mouseY < height/2 + 120 + 20) {
+      console.log("Play Again button clicked, resetting game");
+      gameState = "play";
+      resetGame();
+      // Reset all overlay flags
+      showHelp = false;
+      showLeaderboard = false;
+      showScoreSubmission = false;
+      scoreSubmitted = false;
+      return false;
+    }
+  }
+  
+  // Check for buttons in start screen
+  if (gameState === "start") {
+    // Check for "Play" button
+    if (mouseX > width/2 - 100 && mouseX < width/2 + 100 && 
+        mouseY > height/2 + 60 - 20 && mouseY < height/2 + 60 + 20) {
+      console.log("Play button clicked from start screen");
+      gameState = "play";
+      resetGame();
+      return false;
+    }
+    
+    // Check for "View Leaderboard" button in start screen
+    if (mouseX > width/2 - 100 && mouseX < width/2 + 100 && 
+        mouseY > height/2 + 120 - 20 && mouseY < height/2 + 120 + 20) {
+      console.log("View Leaderboard button clicked from start screen");
+      
+      // Explicitly set flags to ensure correct behavior
+      showLeaderboard = true;
+      showHelp = false;
+      
+      // Fetch leaderboard data
+      fetchLeaderboard();
+      return false;
+    }
+  }
+  
+  // If we're in the leaderboard screen, check for close button
+  if (showLeaderboard) {
+    // Check for close button (top right)
+    if (mouseX > width - 50 && mouseY < 50) {
+      console.log("Leaderboard close button clicked");
+      showLeaderboard = false;
+      return false;
+    }
+    
+    // Check for "Return to Game" button
+    if (mouseX > width/2 - 75 && mouseX < width/2 + 75 && 
+        mouseY > height - 80 - 20 && mouseY < height - 80 + 20) {
+      console.log("Return to Game button clicked from leaderboard");
+      showLeaderboard = false;
+      return false;
+    }
+    
+    // Check for "Refresh" button
+    if (mouseX > width/2 + 200 - 75 && mouseX < width/2 + 200 + 75 && 
+        mouseY > height - 80 - 20 && mouseY < height - 80 + 20) {
+      console.log("Refresh button clicked from leaderboard");
+      fetchLeaderboard();
+      return false;
+    }
+  }
+  
+  // Handle button clicks using the stored reference
+  if (this.hoveredButton) {
+    console.log("Executing button click handler");
+    // Call the button function
+    this.hoveredButton();
+    return false;
   }
   
   return true;
@@ -563,14 +949,16 @@ function keyPressed() {
     } else if (keyCode === ENTER) {
       // Submit form if both fields have content
       if (playerNameInput && playerEmailInput) {
+        // Ensure help screen is closed before submission
+        showHelp = false;
         submitScore();
       }
       return false;
     }
   }
   
-  // Toggle help screen with H key
-  if (key === 'h' || key === 'H') {
+  // Toggle help screen with H key, but only if not in score submission
+  if ((key === 'h' || key === 'H') && !showScoreSubmission) {
     showHelp = !showHelp;
     return false;
   }
@@ -592,7 +980,7 @@ function keyPressed() {
   }
   
   if (keyCode === ENTER) {
-    if (gameState === "start" || gameState === "gameover") {
+    if ((gameState === "start" || gameState === "gameover") && !showScoreSubmission && !showLeaderboard && !window.preventGameRestart) {
       gameState = "play";
       resetGame();
     }
@@ -652,54 +1040,136 @@ async function fetchLeaderboard() {
 }
 
 async function submitScore() {
+  console.log("submitScore function called");
+  
+  // Force game state to game over
+  gameState = "gameover";
+  
+  // Set a flag to prevent the game from restarting
+  window.preventGameRestart = true;
+  
+  // Prevent duplicate submissions
+  if (leaderboardLoading) {
+    console.log("Submission already in progress, ignoring duplicate click");
+    return;
+  }
+  
+  if (scoreSubmitted) {
+    console.log("Score already submitted, closing submission window");
+    showScoreSubmission = false;
+    showLeaderboard = true;
+    return;
+  }
+  
+  // Trim input values to remove any whitespace
+  playerNameInput = playerNameInput.trim();
+  playerEmailInput = playerEmailInput.trim();
+  
+  console.log("Input values:", { name: playerNameInput, email: playerEmailInput });
+  
   if (!playerNameInput || !playerEmailInput) {
+    console.log("Missing input fields:", { name: playerNameInput, email: playerEmailInput });
     leaderboardError = 'Please enter both name and email.';
     return;
   }
   
-  // Simple email validation
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(playerEmailInput)) {
-    leaderboardError = 'Please enter a valid email address.';
+  // More lenient email validation - just check for @ symbol
+  if (!playerEmailInput.includes('@')) {
+    console.log("Invalid email format (missing @):", playerEmailInput);
+    leaderboardError = 'Please enter a valid email address with @ symbol.';
     return;
   }
   
   // Check if Supabase is initialized
   if (!supabase) {
+    console.log("Supabase not initialized");
     leaderboardError = 'Score submission is not available. Supabase not configured.';
     return;
   }
   
+  console.log("Preparing to submit score to Supabase");
+  console.log("Supabase object:", supabase ? "exists" : "null");
+  console.log("Supabase from method:", typeof supabase.from === 'function' ? "exists" : "missing");
   leaderboardLoading = true;
   leaderboardError = '';
   
+  // Store player information before submission
+  const submittedName = playerNameInput;
+  const submittedEmail = playerEmailInput;
+  const submittedScore = score;
+  const submittedWave = wave;
+  
   try {
+    console.log("Submitting score to Supabase:", {
+      player_name: submittedName,
+      email: submittedEmail,
+      score: submittedScore,
+      wave_reached: submittedWave
+    });
+    
     // Insert into the main leaderboard table (with email)
-    const { error } = await supabase
+    console.log("About to call supabase.from('leaderboard')");
+    const { data, error } = await supabase
       .from('leaderboard')
       .insert([
         { 
-          player_name: playerNameInput, 
-          email: playerEmailInput, 
-          score: score,
-          wave_reached: wave
+          player_name: submittedName, 
+          email: submittedEmail, 
+          score: submittedScore,
+          wave_reached: submittedWave
         }
-      ]);
+      ])
+      .select();
     
-    if (error) throw error;
+    console.log("Supabase insert completed");
     
-    // Success
+    if (error) {
+      console.error("Supabase insert error:", error);
+      throw error;
+    }
+    
+    console.log("Score submitted successfully, response data:", data);
+    
+    // Success - immediately close the submission form
     showScoreSubmission = false;
     scoreSubmitted = true;
     
-    // Refresh leaderboard
-    fetchLeaderboard();
+    // Make sure help screen doesn't appear
+    showHelp = false;
+    
+    // Ensure we stay in game over state
+    gameState = "gameover";
+    
+    // Store the fact that we've submitted a score in localStorage to make it persistent
+    try {
+      localStorage.setItem('scoreSubmitted', 'true');
+      localStorage.setItem('submittedGameState', 'gameover');
+    } catch (e) {
+      console.error("Could not store score submission state in localStorage:", e);
+    }
+    
+    // Refresh leaderboard and show it
+    await fetchLeaderboard();
     showLeaderboard = true;
     
   } catch (error) {
     console.error('Error submitting score:', error);
-    leaderboardError = 'Failed to submit score. Please try again.';
+    console.error('Error details:', error.message, error.stack);
+    leaderboardError = 'Failed to submit score: ' + (error.message || 'Unknown error');
     leaderboardLoading = false;
+    
+    // Display the error in the console for debugging
+    console.log("Leaderboard error set to:", leaderboardError);
+  } finally {
+    // Make sure leaderboardLoading is reset if there was an error
+    if (leaderboardError) {
+      leaderboardLoading = false;
+    }
+    
+    // Reset the flag after a short delay to ensure the game doesn't restart
+    setTimeout(() => {
+      window.preventGameRestart = false;
+    }, 2000);
   }
 }
 
@@ -724,74 +1194,112 @@ function playGame() {
   
   // Handle boss fight
   if (isBossFight) {
-    if (!boss) {
-      // Create boss
-      boss = new Boss(wave);
-      bossWarningTimer = 0;
-    }
-    
-    // Update and show boss
-    boss.update();
-    boss.show();
-    
-    // Check collision with player bullets
-    for (let j = player.bullets.length - 1; j >= 0; j--) {
-      if (boss.hits(player.bullets[j])) {
-        boss.health -= 1;
-        particleEffects.push(new ParticleEffect(player.bullets[j].x, player.bullets[j].y));
-        player.bullets.splice(j, 1);
-        
-        // Check if boss is defeated
-        if (boss.health <= 0) {
-          // Boss defeated
-          let bossPoints = boss.points || 500 * wave;
-          score += bossPoints;
-          console.log("Boss defeated! Score: " + score);
-          
-          for (let i = 0; i < 10; i++) {
-            particleEffects.push(new ParticleEffect(
-              boss.x + random(-boss.size/2, boss.size/2), 
-              boss.y + random(-boss.size/2, boss.size/2)
-            ));
-          }
-          
-          // Drop power-ups
-          for (let i = 0; i < 3; i++) {
-            powerUps.push(new PowerUp(
-              boss.x + random(-50, 50),
-              boss.y + random(-50, 50),
-              floor(random(3))
-            ));
-          }
-          
-          boss = null;
-          isBossFight = false;
-          bossDefeated = true;
-          
-          // Advance to next wave
-          wave++;
-          waveEnemyCount = 10 + wave * 5;
-          enemiesDefeated = 0;
-          difficultyMultiplier += 0.2;
-          
-          // Display wave notification
-          fill(255, 215, 0);
-          textSize(32);
-          textAlign(CENTER, CENTER);
-          text(`WAVE ${wave}`, width / 2, height / 2);
-        }
+    try {
+      if (!boss) {
+        // Create boss
+        console.log(`Creating boss for wave ${wave}`);
+        boss = new Boss(wave);
+        bossWarningTimer = 0;
       }
-    }
-    
-    // Check collision with player
-    if (boss && boss.hitsPlayer(player) && invincibleTimer <= 0) {
-      lives--;
-      invincibleTimer = 120; // 2 seconds of invincibility
-      particleEffects.push(new ParticleEffect(player.x, player.y));
       
-      if (lives <= 0) {
-        gameState = "gameover";
+      // Update and show boss if it exists
+      if (boss) {
+        try {
+          boss.update();
+          boss.show();
+          
+          // Check collision with player bullets
+          for (let j = player.bullets.length - 1; j >= 0; j--) {
+            if (boss && boss.hits && typeof boss.hits === 'function' && player.bullets[j] && 
+                boss.hits(player.bullets[j])) {
+              boss.health -= 1;
+              particleEffects.push(new ParticleEffect(player.bullets[j].x, player.bullets[j].y));
+              player.bullets.splice(j, 1);
+              
+              // Check if boss is defeated
+              if (boss.health <= 0) {
+                // Boss defeated
+                let bossPoints = boss.points || 500 * wave;
+                score += bossPoints;
+                console.log(`Boss defeated! Wave ${wave} completed. Score: ${score}`);
+                
+                for (let i = 0; i < 10; i++) {
+                  particleEffects.push(new ParticleEffect(
+                    boss.x + random(-boss.size/2, boss.size/2), 
+                    boss.y + random(-boss.size/2, boss.size/2)
+                  ));
+                }
+                
+                // Drop power-ups
+                for (let i = 0; i < 3; i++) {
+                  powerUps.push(new PowerUp(
+                    boss.x + random(-50, 50),
+                    boss.y + random(-50, 50),
+                    floor(random(3))
+                  ));
+                }
+                
+                boss = null;
+                isBossFight = false;
+                bossDefeated = true;
+                
+                // Advance to next wave
+                wave++;
+                waveEnemyCount = 10 + wave * 5;
+                enemiesDefeated = 0;
+                difficultyMultiplier += 0.2;
+                
+                // Display wave notification
+                fill(255, 215, 0);
+                textSize(32);
+                textAlign(CENTER, CENTER);
+                text(`WAVE ${wave}`, width / 2, height / 2);
+              }
+            }
+          }
+          
+          // Check collision with player
+          if (boss && boss.hitsPlayer && typeof boss.hitsPlayer === 'function' && 
+              player && boss.hitsPlayer(player) && invincibleTimer <= 0) {
+            lives--;
+            invincibleTimer = 120; // 2 seconds of invincibility
+            particleEffects.push(new ParticleEffect(player.x, player.y));
+            
+            if (lives <= 0) {
+              gameState = "gameover";
+            }
+          }
+        } catch (innerError) {
+          console.error("Error in boss update/show:", innerError);
+          // Handle the error but don't reset the boss fight yet
+          // This allows for recovery from temporary errors
+        }
+      } else {
+        console.error("Boss is null but isBossFight is true");
+        // Reset boss fight state
+        isBossFight = false;
+        bossDefeated = true;
+        wave++;
+        waveEnemyCount = 10 + wave * 5;
+        enemiesDefeated = 0;
       }
+    } catch (e) {
+      console.error("Critical error in boss fight:", e);
+      // Recover from error by resetting boss fight
+      boss = null;
+      isBossFight = false;
+      bossDefeated = true;
+      
+      // Advance to next wave to prevent getting stuck
+      wave++;
+      waveEnemyCount = 10 + wave * 5;
+      enemiesDefeated = 0;
+      
+      // Display error notification
+      fill(255, 0, 0);
+      textSize(16);
+      textAlign(CENTER, CENTER);
+      text("Boss fight error - advancing to next wave", width / 2, height / 2 + 50);
     }
   } else {
     // Regular enemy spawning
@@ -802,68 +1310,83 @@ function playGame() {
   
   // Update and process all enemies and bullets
   for (let i = enemies.length - 1; i >= 0; i--) {
-    enemies[i].update();
-    enemies[i].show();
-    
-    // Check if enemy or bullet is off screen
-    if (enemies[i].y > height + 50 || 
-        (enemies[i] instanceof EnemyBullet && 
-         (enemies[i].y < -50 || enemies[i].x > width + 50 || enemies[i].x < -50))) {
-      enemies.splice(i, 1);
+    // Skip if enemy no longer exists (might have been removed in a previous iteration)
+    if (!enemies[i]) {
       continue;
     }
     
-    // Handle collisions based on enemy type
-    if (enemies[i] instanceof EnemyBullet) {
-      // Enemy bullet collision with player
-      if (enemies[i].hits(player) && invincibleTimer <= 0) {
-        lives--;
-        invincibleTimer = 120; // 2 seconds of invincibility
-        particleEffects.push(new ParticleEffect(player.x, player.y));
+    try {
+      // Update and show enemy
+      enemies[i].update();
+      enemies[i].show();
+      
+      // Check if enemy or bullet is off screen
+      if (enemies[i].y > height + 50 || 
+          (enemies[i] instanceof EnemyBullet && 
+           (enemies[i].y < -50 || enemies[i].x > width + 50 || enemies[i].x < -50))) {
         enemies.splice(i, 1);
-        
-        if (lives <= 0) {
-          gameState = "gameover";
-        }
+        continue;
       }
-    } else {
-      // Regular enemy collision with player bullets
-      let hitByBullet = false;
       
-      for (let j = player.bullets.length - 1; j >= 0; j--) {
-        if (enemies[i] && enemies[i].hits(player.bullets[j])) {
-          let enemyPoints = enemies[i].points || (enemies[i].type + 1) * 10;
-          score += enemyPoints;
-          console.log("Enemy hit! Score: " + score);
-          
-          enemiesDefeated++;
-          particleEffects.push(new ParticleEffect(enemies[i].x, enemies[i].y));
-          
-          // Chance to drop power-up
-          if (random(1) < 0.1) {
-            powerUps.push(new PowerUp(enemies[i].x, enemies[i].y, floor(random(3))));
-          }
-          
+      // Handle collisions based on enemy type
+      if (enemies[i] instanceof EnemyBullet) {
+        // Enemy bullet collision with player
+        if (enemies[i].hits && typeof enemies[i].hits === 'function' && 
+            enemies[i].hits(player) && invincibleTimer <= 0) {
+          lives--;
+          invincibleTimer = 120; // 2 seconds of invincibility
+          particleEffects.push(new ParticleEffect(player.x, player.y));
           enemies.splice(i, 1);
-          player.bullets.splice(j, 1);
-          hitByBullet = true;
-          break;
+          
+          if (lives <= 0) {
+            gameState = "gameover";
+          }
         }
-      }
-      
-      // Skip player collision check if enemy was hit by bullet
-      if (hitByBullet) continue;
-      
-      // Regular enemy collision with player
-      if (enemies[i] && enemies[i].hits(player) && invincibleTimer <= 0) {
-        lives--;
-        invincibleTimer = 120; // 2 seconds of invincibility
-        particleEffects.push(new ParticleEffect(player.x, player.y));
+      } else {
+        // Regular enemy collision with player bullets
+        let hitByBullet = false;
         
-        if (lives <= 0) {
-          gameState = "gameover";
+        for (let j = player.bullets.length - 1; j >= 0; j--) {
+          if (enemies[i] && enemies[i].hits && typeof enemies[i].hits === 'function' && 
+              enemies[i].hits(player.bullets[j])) {
+            let enemyPoints = enemies[i].points || (enemies[i].type + 1) * 10;
+            score += enemyPoints;
+            console.log("Enemy hit! Score: " + score);
+            
+            enemiesDefeated++;
+            particleEffects.push(new ParticleEffect(enemies[i].x, enemies[i].y));
+            
+            // Chance to drop power-up
+            if (random(1) < 0.1) {
+              powerUps.push(new PowerUp(enemies[i].x, enemies[i].y, floor(random(3))));
+            }
+            
+            enemies.splice(i, 1);
+            player.bullets.splice(j, 1);
+            hitByBullet = true;
+            break;
+          }
+        }
+        
+        // Skip player collision check if enemy was hit by bullet
+        if (hitByBullet) continue;
+        
+        // Regular enemy collision with player
+        if (enemies[i] && enemies[i].hits && typeof enemies[i].hits === 'function' && 
+            enemies[i].hits(player) && invincibleTimer <= 0) {
+          lives--;
+          invincibleTimer = 120; // 2 seconds of invincibility
+          particleEffects.push(new ParticleEffect(player.x, player.y));
+          
+          if (lives <= 0) {
+            gameState = "gameover";
+          }
         }
       }
+    } catch (e) {
+      console.error("Error processing enemy:", e);
+      // Remove problematic enemy to prevent freezing
+      enemies.splice(i, 1);
     }
   }
   
@@ -892,6 +1415,7 @@ function playGame() {
   
   // Check if wave is complete
   if (enemiesDefeated >= waveEnemyCount && !isBossFight && !bossDefeated) {
+    console.log(`Wave ${wave} complete, starting boss fight`);
     // Start boss fight
     isBossFight = true;
     bossWarningTimer = 180; // 3 seconds warning
@@ -1411,7 +1935,12 @@ class Boss {
         
         // Simple bullet pattern
         for (let i = -2; i <= 2; i++) {
-          enemies.push(new EnemyBullet(this.x + i * 20, this.y + this.size/2, i * 0.5, 5));
+          // Create enemy bullet with safe values
+          try {
+            enemies.push(new EnemyBullet(this.x + i * 20, this.y + this.size/2, i * 0.5, 5));
+          } catch (e) {
+            console.error("Error creating enemy bullet:", e);
+          }
         }
       }
     } else if (this.level <= 4) {
@@ -1423,36 +1952,46 @@ class Boss {
         if (this.attackPattern === 0) {
           // Spread pattern
           for (let i = -3; i <= 3; i++) {
-            enemies.push(new EnemyBullet(this.x, this.y + this.size/2, i * 1, 4));
+            try {
+              enemies.push(new EnemyBullet(this.x, this.y + this.size/2, i * 1, 4));
+            } catch (e) {
+              console.error("Error creating enemy bullet:", e);
+            }
           }
         } else {
           // Targeted pattern - aim at player
-          let dx = player.x - this.x;
-          let dy = player.y - this.y;
-          let angle = atan2(dy, dx);
-          let speed = 6;
-          
-          enemies.push(new EnemyBullet(
-            this.x, 
-            this.y + this.size/2, 
-            cos(angle) * speed, 
-            sin(angle) * speed
-          ));
-          
-          // Add two more bullets at slight angles
-          enemies.push(new EnemyBullet(
-            this.x, 
-            this.y + this.size/2, 
-            cos(angle + 0.2) * speed, 
-            sin(angle + 0.2) * speed
-          ));
-          
-          enemies.push(new EnemyBullet(
-            this.x, 
-            this.y + this.size/2, 
-            cos(angle - 0.2) * speed, 
-            sin(angle - 0.2) * speed
-          ));
+          if (player && typeof player.x !== 'undefined' && typeof player.y !== 'undefined') {
+            let dx = player.x - this.x;
+            let dy = player.y - this.y;
+            let angle = atan2(dy, dx);
+            let speed = 6;
+            
+            try {
+              enemies.push(new EnemyBullet(
+                this.x, 
+                this.y + this.size/2, 
+                cos(angle) * speed, 
+                sin(angle) * speed
+              ));
+              
+              // Add two more bullets at slight angles
+              enemies.push(new EnemyBullet(
+                this.x, 
+                this.y + this.size/2, 
+                cos(angle + 0.2) * speed, 
+                sin(angle + 0.2) * speed
+              ));
+              
+              enemies.push(new EnemyBullet(
+                this.x, 
+                this.y + this.size/2, 
+                cos(angle - 0.2) * speed, 
+                sin(angle - 0.2) * speed
+              ));
+            } catch (e) {
+              console.error("Error creating enemy bullet:", e);
+            }
+          }
         }
       }
     } else {
@@ -1461,67 +2000,41 @@ class Boss {
         this.attackTimer = 0;
         this.attackPattern = (this.attackPattern + 1) % 3;
         
-        if (this.attackPattern === 0) {
-          // Circle pattern
-          for (let i = 0; i < 8; i++) {
-            let angle = TWO_PI / 8 * i;
-            enemies.push(new EnemyBullet(
-              this.x, 
-              this.y, 
-              cos(angle) * 5, 
-              sin(angle) * 5
-            ));
-          }
-        } else if (this.attackPattern === 1) {
-          // Targeted rapid fire
-          let dx = player.x - this.x;
-          let dy = player.y - this.y;
-          let angle = atan2(dy, dx);
-          let speed = 7;
-          
-          enemies.push(new EnemyBullet(
-            this.x, 
-            this.y + this.size/2, 
-            cos(angle) * speed, 
-            sin(angle) * speed
-          ));
-        } else {
-          // Spawn minions
-          if (frameCount % 300 === 0) {
-            enemies.push(new Enemy(1, difficultyMultiplier));
-            enemies.push(new Enemy(1, difficultyMultiplier));
-          }
-          
-          // Laser warning
-          fill(255, 0, 0, 150);
-          rect(this.x - 5, this.y, 10, height - this.y);
-          
-          // After warning, fire laser
-          if (frameCount % 60 === 0) {
-            // Check if player is in laser path
-            if (abs(player.x - this.x) < 30 && player.y > this.y && invincibleTimer <= 0) {
-              lives--;
-              invincibleTimer = 120;
-              particleEffects.push(new ParticleEffect(player.x, player.y));
-              
-              if (lives <= 0) {
-                gameState = "gameover";
-              }
+        try {
+          if (this.attackPattern === 0) {
+            // Circle pattern
+            for (let i = 0; i < 8; i++) {
+              let angle = TWO_PI / 8 * i;
+              enemies.push(new EnemyBullet(
+                this.x, 
+                this.y, 
+                cos(angle) * 5, 
+                sin(angle) * 5
+              ));
             }
+          } else if (this.attackPattern === 1 && player) {
+            // Targeted rapid fire
+            let dx = player.x - this.x;
+            let dy = player.y - this.y;
+            let angle = atan2(dy, dx);
             
-            // Visual laser effect
-            fill(255, 0, 0);
-            rect(this.x - 5, this.y, 10, height - this.y);
+            for (let i = -1; i <= 1; i += 0.5) {
+              enemies.push(new EnemyBullet(
+                this.x, 
+                this.y + this.size/2, 
+                cos(angle + i * 0.1) * 7, 
+                sin(angle + i * 0.1) * 7
+              ));
+            }
+          } else {
+            // Spawn minions
+            if (enemies.length < 10) {
+              enemies.push(new Enemy(floor(random(3)), 1.5));
+              enemies.push(new Enemy(floor(random(3)), 1.5));
+            }
           }
-        }
-      }
-    }
-    
-    // Update enemy bullets
-    for (let i = enemies.length - 1; i >= 0; i--) {
-      if (enemies[i] instanceof EnemyBullet) {
-        if (enemies[i].y > height || enemies[i].y < 0 || enemies[i].x > width || enemies[i].x < 0) {
-          enemies.splice(i, 1);
+        } catch (e) {
+          console.error("Error in boss attack pattern:", e);
         }
       }
     }
@@ -1652,6 +2165,8 @@ class EnemyBullet {
     this.vx = vx;
     this.vy = vy;
     this.size = 8;
+    // Add type property to ensure it's treated correctly in collision detection
+    this.type = -1; // Special type for enemy bullets
   }
   
   update() {
@@ -1666,7 +2181,18 @@ class EnemyBullet {
   }
   
   hits(obj) {
+    // Check if the object exists and has x, y properties
+    if (!obj || typeof obj.x === 'undefined' || typeof obj.y === 'undefined') {
+      return false;
+    }
+    
+    // Calculate distance between this bullet and the object
     let d = dist(this.x, this.y, obj.x, obj.y);
-    return d < this.size/2 + obj.size/2;
+    
+    // Use object's size if available, otherwise default to 20
+    let objSize = obj.size || 20;
+    
+    // Return true if they are colliding
+    return d < (this.size/2 + objSize/2);
   }
 } 
