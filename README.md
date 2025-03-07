@@ -2,8 +2,6 @@
 
 A fast-paced space shooter game with waves of enemies, boss battles, and an online leaderboard.
 
-![Space Racer Game](https://github.com/dlozovsky/Spaceracer/raw/master/screenshot.png)
-
 ## Play Now
 
 You can play the game online at: [https://dlozovsky.github.io/Spaceracer/](https://dlozovsky.github.io/Spaceracer/)
